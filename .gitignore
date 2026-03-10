@@ -1,0 +1,9 @@
+.venv/
+*.log
+*.txt
+session/
+session_glm/
+memory/
+__pycache__/
+test/
+unused/
