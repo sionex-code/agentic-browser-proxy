@@ -23,7 +23,6 @@ An autonomous AI-powered browser agent that can perform tasks on websites using 
 
 ```bash
 pip install -r requirements.txt
-patchright install chromium
 ```
 
 ### 2. Start the LLM Proxy
