@@ -27,7 +27,8 @@ from .actions import do_action
 
 
 class BrowserAgent:
-    def __init__(self, page, context, goal, max_steps=50, session_id=None):
+    def __init__(self, page, context, goal, max_steps=50, session_id=None,
+                 skill_config=None, duplicate_tracker=None):
         self.page = page
         self.context = context  # browser context for tab management
         self.goal = goal
@@ -41,6 +42,13 @@ class BrowserAgent:
         self.pending_dialog = None
         self.pending_popup = None  # Store info about new popup windows
         self.start_time = None
+        
+        # Skill system integration
+        self.skill_config = skill_config
+        self.duplicate_tracker = duplicate_tracker
+        self.answers_count = 0
+        self.current_profile = skill_config.active_profile if skill_config else None
+        self._switch_to_profile = None  # Set by switch_profile action
         
         # Create session-specific memory
         if not session_id:
@@ -309,11 +317,12 @@ class BrowserAgent:
                 return json.loads(m.group(1))
             except:
                 pass
-        # Try finding any JSON object
-        m = re.search(r'\{.*\}', text, re.DOTALL)
-        if m:
+        # Try finding any JSON object (safely)
+        start_idx = text.find('{')
+        end_idx = text.rfind('}')
+        if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
             try:
-                return json.loads(m.group(0))
+                return json.loads(text[start_idx:end_idx+1])
             except:
                 pass
         raise ValueError(f"No valid JSON found in response")
@@ -342,8 +351,13 @@ class BrowserAgent:
                 text = el["text"][:60]
                 parts.append(f'"{text}"')
             if el.get("href"):
-                href = el["href"][:80]
+                # Increase limit to 400 chars to avoid truncating long URLs like Quora questions
+                href = el["href"][:400]
                 parts.append(f'href="{href}"')
+                # Inject duplicate check directly into element text to save tokens
+                if self.duplicate_tracker and hasattr(self.duplicate_tracker, 'is_done'):
+                    if self.duplicate_tracker.is_done(el["href"]):
+                        parts.append("🛑DUPLICATE🛑")
             if el.get("value"):
                 parts.append(f'value="{el["value"][:40]}"')
             if el.get("disabled"):
@@ -466,6 +480,31 @@ class BrowserAgent:
 
         today_date = datetime.now().strftime("%m-%d-%Y")
 
+        # Build skill context if a skill file is loaded
+        skill_text = ""
+        if self.skill_config:
+            skill_lines = []
+            skill_lines.append(f"Site: {self.skill_config.site}")
+            skill_lines.append(f"Profile: {self.current_profile}")
+            skill_lines.append(f"Answers posted this session: {self.answers_count}")
+            skill_lines.append(f"Max answers per session: {self.skill_config.rules.answers_per_session}")
+            skill_lines.append(f"Wait between posts: {self.skill_config.rules.wait_between_posts_seconds}s")
+            if self.skill_config.rules.switch_profile_after > 0:
+                remaining = self.skill_config.rules.switch_profile_after - self.answers_count
+                skill_lines.append(f"Switch profile after: {self.skill_config.rules.switch_profile_after} answers ({remaining} remaining)")
+            if self.duplicate_tracker:
+                skill_lines.append(f"Completed items tracked: {self.duplicate_tracker.count()}")
+            if self.skill_config.selectors:
+                skill_lines.append("Selector hints:")
+                for name, sel in self.skill_config.selectors.items():
+                    skill_lines.append(f"  {name}: {sel}")
+            skill_text = "\n".join(skill_lines)
+
+        # Build skill instructions section
+        skill_instructions = ""
+        if self.skill_config and self.skill_config.instructions:
+            skill_instructions = f"\n\n## Skill Instructions (from .yaser/{self.skill_config.site.replace('.com','')}.md)\n{self.skill_config.instructions}"
+
         user_prompt = f"""## Current Date
 {today_date}
 
@@ -474,6 +513,9 @@ class BrowserAgent:
 
 ## Page State
 {state_summary}
+{f"""
+## Skill Context
+{skill_text}""" if skill_text else ""}
 
 ## Memory (lessons from past runs on this domain)
 {memory_text}
@@ -486,7 +528,7 @@ class BrowserAgent:
 {text_context}
 
 ## Action History (step {self.step_count}/{self.max_steps}, {elapsed_display} elapsed)
-{history_text}{error_text}{vision_text}{failure_text}
+{history_text}{error_text}{vision_text}{failure_text}{skill_instructions}
 
 What is the next action? Respond with ONLY JSON."""
 
@@ -540,6 +582,8 @@ What is the next action? Respond with ONLY JSON."""
                             stdout=subprocess.DEVNULL, 
                             stderr=subprocess.DEVNULL
                         )
+                    except FileNotFoundError:
+                        print(f"  ⚠ Failed to read thought: 'edge-playback' command not found. Please install edge-tts or disable READ_THOUGHTS in config.")
                     except Exception as e:
                         print(f"  ⚠ Failed to read thought: {e}")
             actions = action_data.get("actions", [])
@@ -580,6 +624,8 @@ What is the next action? Respond with ONLY JSON."""
                                     stdout=subprocess.DEVNULL, 
                                     stderr=subprocess.DEVNULL
                                 )
+                            except FileNotFoundError:
+                                print(f"  ⚠ Failed to read thought: 'edge-playback' command not found. Please install edge-tts or disable READ_THOUGHTS in config.")
                             except Exception as e:
                                 print(f"  ⚠ Failed to read thought: {e}")
                     actions = action_data.get("actions", [])
@@ -644,7 +690,7 @@ What is the next action? Respond with ONLY JSON."""
                     except Exception:
                         pass
                     
-                    if result in ["wait", "abort", "completed", "failed"]:
+                    if result in ["wait", "abort", "completed", "failed", "switch_profile"]:
                         return result
                     break  # Success, move to next action
                 except Exception as e:
@@ -822,6 +868,10 @@ What is the next action? Respond with ONLY JSON."""
                 self.memory.mark_failed("Aborted due to errors")
                 self.memory.save()
                 return False
+            elif result == "switch_profile":
+                print(f"\n  🔄 Profile switch requested after {self.step_count} steps ({self._elapsed_str()})")
+                self.memory.save()
+                return "switch_profile"
 
             # Small delay between steps
             await asyncio.sleep(0.5)

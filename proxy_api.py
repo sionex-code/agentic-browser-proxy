@@ -624,6 +624,22 @@ async def list_models():
         ]
     }
 
+@app.post("/v1/chat/new")
+@app.post("/chat/new")
+async def start_new_chat():
+    global current_chat_url
+    if page:
+        logger.info("Starting a new chat session by navigating to base URL.")
+        try:
+            await page.goto('https://gemini.google.com/', timeout=30000)
+            await page.wait_for_selector('rich-textarea', timeout=15000)
+        except Exception as e:
+            logger.error(f"Error starting new chat: {e}")
+        current_chat_url = 'https://gemini.google.com/'
+        save_session_url(current_chat_url)
+        return {"status": "success", "message": "New chat started"}
+    return {"status": "error", "message": "Browser not initialized"}
+
 @app.on_event("startup")
 async def startup_event():
     print("\n" + "="*60)

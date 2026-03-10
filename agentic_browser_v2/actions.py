@@ -966,6 +966,62 @@ async def do_action(agent, action_type, action):
             print(f"  ⚠ File read error: {e}")
             agent.action_history.append(f"FAILED read {filename}: {e}")
 
+    # ─── Skill Actions ───
+    elif action_type == "check_duplicate":
+        item = action.get("item", "")
+        if hasattr(agent, 'duplicate_tracker') and agent.duplicate_tracker:
+            is_dup = agent.duplicate_tracker.is_done(item)
+            status = "DUPLICATE" if is_dup else "NEW"
+            print(f"  🔍 Duplicate check '{item[:60]}': {status}")
+            agent.action_history.append(f"Duplicate check: {item[:50]} → {status}")
+        else:
+            print(f"  ⚠ No duplicate tracker loaded (no skill file?)")
+            agent.action_history.append(f"Duplicate check skipped (no tracker): {item[:50]}")
+
+    elif action_type == "mark_completed_item":
+        item = action.get("item", "")
+        if hasattr(agent, 'duplicate_tracker') and agent.duplicate_tracker:
+            agent.duplicate_tracker.mark_done(item)
+            # Increment answer counter
+            if hasattr(agent, 'answers_count'):
+                agent.answers_count += 1
+                print(f"  📊 Answer count: {agent.answers_count}")
+                # Check if we need to switch profiles
+                if hasattr(agent, 'skill_config') and agent.skill_config:
+                    from .profile_manager import should_switch_profile
+                    if should_switch_profile(agent.skill_config, agent.answers_count):
+                        print(f"  🔄 Reached {agent.answers_count} answers — profile switch recommended")
+                        agent.action_history.append(f"Marked complete: {item[:50]} (answer #{agent.answers_count} — switch profile recommended)")
+                    else:
+                        agent.action_history.append(f"Marked complete: {item[:50]} (answer #{agent.answers_count})")
+                else:
+                    agent.action_history.append(f"Marked complete: {item[:50]} (answer #{agent.answers_count})")
+            else:
+                agent.action_history.append(f"Marked complete: {item[:50]}")
+        else:
+            print(f"  ⚠ No duplicate tracker loaded (no skill file?)")
+            agent.action_history.append(f"Mark complete skipped (no tracker): {item[:50]}")
+
+    elif action_type == "switch_profile":
+        profile_name = action.get("profile_name", "")
+        if hasattr(agent, 'skill_config') and agent.skill_config:
+            from .profile_manager import get_next_profile
+            if not profile_name:
+                current = getattr(agent, 'current_profile', agent.skill_config.active_profile)
+                profile_name = get_next_profile(agent.skill_config, current)
+            if profile_name:
+                print(f"  🔄 Profile switch requested → {profile_name}")
+                agent.action_history.append(f"Profile switch → {profile_name}")
+                # Signal the outer loop to restart with new profile
+                agent._switch_to_profile = profile_name
+                return "switch_profile"
+            else:
+                print(f"  ⚠ No next profile available (only 1 profile defined)")
+                agent.action_history.append("Profile switch failed: only 1 profile")
+        else:
+            print(f"  ⚠ No skill config loaded — cannot switch profiles")
+            agent.action_history.append("Profile switch failed: no skill config")
+
     # ─── Completion Actions ───
     elif action_type == "goal_completed":
         reason = action.get("reason", "Goal completed")

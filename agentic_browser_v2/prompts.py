@@ -76,6 +76,11 @@ SYSTEM_PROMPT = """You are an expert autonomous browser agent. You control a rea
 - **write_to_file** — Append a line of data to a file. Params: `filename` (string), `content` (string). Use this to save scraped data, reviews, results, etc. Each call appends one line.
 - **read_file** — Read contents of a file. Params: `filename` (string). Returns the file contents (last 50 lines if file is large).
 
+### Skill Actions (only available when a skill file is loaded)
+- **check_duplicate** — Check if a URL/item has already been completed. Params: `item` (string). Note: URLs that are already completed will NOW BE AUTOMATICALLY MARKED with "🛑DUPLICATE🛑" in your element list. You do NOT need to run this action to check those links anymore. Simply SCAN the element list, skip any with the 🛑DUPLICATE🛑 tag, and find a valid one. This allows you to group MULTIPLE valid actions together in one turn to save tokens!
+- **mark_completed_item** — Mark a URL/item as completed. Params: `item` (string). Call this AFTER successfully completing an action (e.g. posting an answer). The item is saved to disk permanently.
+- **switch_profile** — Switch to a different browser profile. Params: `profile_name` (string, optional — if omitted, switches to the next profile in rotation). This will close the current browser and reopen with the new profile. Use this when you have reached the `answers_per_session` limit.
+
 ### Completion Actions
 - **goal_completed** — Goal achieved successfully. Params: `reason` (string)
 - **goal_failed** — Goal cannot be achieved. Params: `reason` (string)

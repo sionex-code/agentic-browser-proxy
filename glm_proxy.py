@@ -376,6 +376,12 @@ async def send_message_streaming(message_text, system_instructions=None, chunk_q
     
     import json
     
+    # Wait for the chat text box to appear
+    try:
+        await page.wait_for_selector('#chat-input', timeout=15000)
+    except Exception as e:
+        logger.warning(f"Timeout waiting for #chat-input before sending message: {e}")
+
     # Select Model GLM-4.7
     js_select_model = """
     {
@@ -848,7 +854,11 @@ async def start_new_chat():
     global current_chat_url
     if page:
         logger.info("Starting a new chat session by navigating to base URL.")
-        await page.goto('https://chat.z.ai/')
+        try:
+            await page.goto('https://chat.z.ai/', timeout=30000)
+            await page.wait_for_selector('#chat-input', timeout=15000)
+        except Exception as e:
+            logger.error(f"Error starting new chat: {e}")
         current_chat_url = 'https://chat.z.ai/'
         save_session_url(current_chat_url)
         return {"status": "success", "message": "New chat started"}
